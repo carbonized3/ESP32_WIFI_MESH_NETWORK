@@ -120,6 +120,7 @@ static mesh_addr_t mesh_parent_addr;
 static int mesh_layer = -1;
 static esp_netif_t *netif_sta = NULL;
 
+
 static bool is_comm_p2p_started = false;        // Глобально будем отслеживать созданы ли наши задачи или удалены
 
 xSemaphoreHandle relay_semaphore;
