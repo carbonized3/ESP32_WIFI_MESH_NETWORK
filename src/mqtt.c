@@ -7,6 +7,7 @@ xQueueHandle mqtt_queue_rx;             // Очредедь для прима и
 xQueueHandle mqtt_queue_tx;             // Очередь для приёма от нод и отправки во вне
 EventGroupHandle_t mqtt_state_event_group;
 
+static bool mqtt_connected_flag = false;     // Флаг будем использовать чтобы не удалять по нескольку раз удаленные очереди
 static TaskHandle_t xRecvMqttTask = NULL, xTxToMqttTask = NULL;
 
 static void log_error_if_nonzero(const char *message, int error_code)
@@ -23,6 +24,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     client = event->client;                             // Присвоим из входных данных хэндл клиента нам
     int msg_id;
 
+
     mqttPayload payload;            // Структура для передачи в очреедь
      // Чтобы потом с помощью этого хэндла удалить задачу, если дисконектнимся
     char buff[40];
@@ -32,6 +34,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         case MQTT_EVENT_CONNECTED:
               
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+
+            mqtt_connected_flag = true;
 
             for (int i = 0; i < AMOUNT_OF_NODES; i++)   // Подписываемся на все топики сразу
             {
@@ -44,27 +48,28 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
             }
             
-            xTaskCreate(esp_mesh_rx_from_mqtt_and_tx_to_all_nodes, "mqtt_recv_and_tx_to_all task",
+            xTaskCreate(esp_mesh_rx_from_mqtt_and_tx_to_all_nodes, "esp_mesh_rx_from_mqtt_and_tx_to_all_nodes",
                                              3092, NULL, 6, &xRecvMqttTask);  // Последний параметр будем использовать для удаления таска
 
             //xTaskCreate(esp_mesh_tx_to_mqtt, "to_mqtt_tx task", 3092, (void *)&client, 6, &xTxToMqttTask);  // В качестве аргумента дескриптор клиента
-            xTaskCreate(esp_mesh_tx_to_mqtt, "to_mqtt_tx task", 3092, NULL, 6, &xTxToMqttTask);
-
+            xTaskCreate(esp_mesh_tx_to_mqtt, "esp_mesh_tx_to_mqtt", 3092, NULL, 6, &xTxToMqttTask);
             xEventGroupSetBits(mqtt_state_event_group, MQTT_EVT_CONNECTED);
-
-           /* xSemaphoreGive(allow_tx_semaphore);   // Дадим работать задачам 
-            xSemaphoreGive(allow_rx_semaphore);     */
-
             break;
+
         case MQTT_EVENT_DISCONNECTED:
-            
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED!");
-            xEventGroupClearBits(mqtt_state_event_group, MQTT_EVT_CONNECTED);
-
-            vTaskDelete(xRecvMqttTask);     // Удалим задачи, чтобы когда в след. раз все переподключится, не создались копии при существующих
-            vTaskDelete(xTxToMqttTask); 
-
+            
+            if( mqtt_connected_flag )
+            {
+                xEventGroupClearBits(mqtt_state_event_group, MQTT_EVT_CONNECTED);
+                vTaskDelete(xRecvMqttTask);     // Удалим задачи, чтобы когда в след. раз все переподключится, не создались копии при существующих
+                printf("esp_mesh_rx_from_mqtt_and_tx_to_all_nodes MQTT SWITCH CASE DELETE\r\n");
+                vTaskDelete(xTxToMqttTask);
+                printf("esp_mesh_tx_to_mqtt  MQTT SWITCH CASE DELETE\r\n");
+                mqtt_connected_flag = false; 
+            }
             break;
+
         case MQTT_EVENT_SUBSCRIBED:
             ESP_LOGI(TAG, "SUBSCRIBED ON TOPIC=%.*s\r\n", event->topic_len, event->topic);
 

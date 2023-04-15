@@ -120,7 +120,7 @@ static mesh_addr_t mesh_parent_addr;
 static int mesh_layer = -1;
 static esp_netif_t *netif_sta = NULL;
 
-
+static bool parent_is_connected = false;           // Добавим переменную чтобы останалвивать процессы лишь один раз
 static bool is_comm_p2p_started = false;        // Глобально будем отслеживать созданы ли наши задачи или удалены
 
 xSemaphoreHandle relay_semaphore;
@@ -158,6 +158,9 @@ void esp_mesh_tx_to_mqtt(void *arg)
         ESP_LOGI(MESH_TAG, "sent msg successful, msg_id=%d", msg_id);
         vTaskDelay(1200 / portTICK_RATE_MS);    // нельзя обращаться к брокеру чаще раза в секунду!!
     }
+    printf("esp_mesh_tx_to_mqtt BEFORE DELETE TASK\r\n");
+    vTaskDelete(NULL);
+
 }
 
 void esp_mesh_rx_from_mqtt_and_tx_to_all_nodes(void *arg)
@@ -243,6 +246,7 @@ void esp_mesh_rx_from_mqtt_and_tx_to_all_nodes(void *arg)
         }
     }
     if( esp_mesh_is_root() )vQueueDelete(mqtt_queue_rx);
+    printf("esp_mesh_p2p_tx_main BEFORE DELETE TASK\r\n");
     vTaskDelete(NULL);
 }
 
@@ -272,10 +276,11 @@ void esp_mesh_p2p_tx_main(void *arg)
 
     //xSemaphoreTake(allow_tx_semaphore, portMAX_DELAY);  
 
+
+
     while (is_running) {
         
         /* Здесь будет обработкат температуры и отправка её в формате topic/data вне условий ! */
-        
         if(esp_mesh_is_root())
         {
             EventBits_t bits = xEventGroupWaitBits(mqtt_state_event_group,  // Ждём фалага коннекта mqtt 
@@ -325,6 +330,7 @@ void esp_mesh_p2p_tx_main(void *arg)
         
     }
     if(esp_mesh_is_root()) vQueueDelete(mqtt_queue_tx);
+    printf("esp_mesh_p2p_tx_main BEFORE DELETE TASK\r\n");
     vTaskDelete(NULL);
 }
 
@@ -451,6 +457,7 @@ void esp_mesh_rx_from_nodes(void *arg)
             */
     }
     if(esp_mesh_is_root()) vQueueDelete(mqtt_queue_tx);
+    printf("esp_mesh_rx_from_nodes BEFORE DELETE TASK\r\n");
     vTaskDelete(NULL);
 }
 
@@ -468,8 +475,8 @@ esp_err_t esp_mesh_comm_p2p_start(void)
         
 		vSemaphoreCreateBinary(relay_semaphore); 
         vTaskDelay(50/ portTICK_RATE_MS);
-        xTaskCreate(esp_mesh_rx_from_nodes, "MPRX", 3072, NULL, 5, NULL);  // Задача на приём создается при любом раскладе
-        xTaskCreate(esp_mesh_p2p_tx_main, "p2p_tx_task", 3072, NULL, 5, NULL);
+        xTaskCreate(esp_mesh_rx_from_nodes, "esp_mesh_rx_from_nodes", 3072, NULL, 5, NULL);  // Задача на приём создается при любом раскладе
+        xTaskCreate(esp_mesh_p2p_tx_main, "esp_mesh_p2p_tx_main", 3072, NULL, 5, NULL);
         xTaskCreate(relay_task, "relay_task", 3072, NULL, 6, NULL);
         
         /*  Задачи создаются на данном этапе одни и те же. Но для корневой ноды будут создаваться ещё и mqtt таски на приём и передачу  */
@@ -561,6 +568,8 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
             */
         }
         gpio_set_level(led_gpio, 1);
+        parent_is_connected = true;
+
         esp_mesh_comm_p2p_start();
     }
     break;
@@ -569,22 +578,17 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(MESH_TAG,
                  "<MESH_EVENT_PARENT_DISCONNECTED>reason:%d",
                  disconnected->reason);
-        is_mesh_connected = false;
         mesh_layer = esp_mesh_get_layer();
-        /*
-            Здесь могут быть какие-либо ответные действия, сеть является самовосстанавливающейся, поэтому без понятия пока что
-            какая должна быть реакция
-        */
-       gpio_set_level(led_gpio, 0);  
+        gpio_set_level(led_gpio, 0); 
 
-       is_running = false;          // Чтобы задачи вышли из бесконечного цикла и удалили себя
-       is_comm_p2p_started = false; // Чтобы, когда мы снова подключимся к родителю вызвали функцию создания задач и зашли по флагу 
-
-       if( esp_mesh_is_root() ) 
-       {
-            vEventGroupDelete(mqtt_state_event_group);  // Удаляем, так как мы каждый коннект заново создаем очередь
-       }
-
+        if( esp_mesh_is_root() && is_mesh_connected ) 
+        {
+            esp_mqtt_client_stop(client);       // Останавливаем mqtt
+            esp_mqtt_client_destroy(client);
+            xEventGroupClearBits(mqtt_state_event_group, MQTT_EVT_CONNECTED);
+            is_mesh_connected = false;
+         //   printf("mqtt_state_event_group, CLEARED SUCCSESFUL!\r\n");
+        }
     }
     break;
     case MESH_EVENT_LAYER_CHANGE: {
