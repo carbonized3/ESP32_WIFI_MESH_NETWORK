@@ -10,26 +10,38 @@
   реализованы в API esp_wifi_mesh, когда устройства, регулярно обмениваясь маячковыми фреймами, следят
   чтобы к роутеру был подключен узел с самым сильным уровнем сигнала.
   
-- Реализован удаленный доступ к каждому узлу в сети посредством протокола MQTT и брокера clusterfly.ru
+- Реализован удаленный доступ к каждому узлу в сети посредством протокола MQTT и брокера clusterfly.ru в виде
+  возможности включать и выключать какой-либо исполнительный механизм (например, реле)
 
-- Реализована телеметрия также через MQTT(в данном коде только заранее известные числа).
+- Реализована телеметрия также через MQTT(например, температура или любые другие данные. В данной реализации
+  заранее известное число)
+
+- Устройств может быть до 52 (весь английский алфавит капсом и без от A до Z и от a до z), в таком 
+  случае не будет путаницы с уникальным топиком каждого узла. Данная реализация являет собой код первого устройства,
+  то есть узла А.
 
 - Код универсален для каждого устройства в сети. Чтобы перенести его на новое устройство, необходимо
-  изменить все строки, в которых участвует строка с топиком (например relayA при переносе кода 
-  на новое устройство заменить на relayB, также с tempA -> tempB и т.д по алфавиту, смотря сколько
-  устройств в данный момент было использовано). 
+  изменить все строки c топиками кроме MQTT_PREFIX, а также некоторые параметры. 
+  А именно:
+    * В mesh_main.h:
+        - в MQTT_TX_TOPIC записать тот топик в виде строки в которой будет слаться сообщение с какой-либо 
+          полезной нагрузкой с учётом неизменяемого префикса (например "user_f8c55df1/tempA" -> "user_f8c55df1/tempB")
+        - в MQTT_RELAY_TOPIC_1 изменить лишь букву ("user_f8c55df1/relayA/1" -> "user_f8c55df1/relayB/1")
+        - в MQTT_RELAY_TOPIC_0 изменить лишь букву ("user_f8c55df1/relayA/0" -> "user_f8c55df1/relayB/0")
+        - в CONFIG_MESH_ROUTER_SSID внести SSID своего роутера в виде строки
+        - в CONFIG_MESH_ROUTER_PASSWD внести пароль от своего роутера
+        - в CONFIG_MESH_TOPOLOGY по желанию поменять топологию сети на MESH_TOPO_CHAIN
+        - в AMOUNT_OF_NODES внести текущее количество устройств в сети
+        - добавить MAC адрес нового добавляемого устройства, назвав её  NODE_X_STA_MAC_STR, где X - буква 
+          добавляемого устройства (например если их было 4, то 5-ый узел будет иметь букву E согласно алфавиту)
+    * В mqtt.h:
+        - в BROKER_USERNAME вписать юзернейм своего аккаунта
+        - в BROKER_PASSWORD вписать пароль от своего аккаунта 
   
-  Также необходимо добавить MAC адрес добавляемого устройства в хедер mesh_main, назвав её 
-  NODE_X_STA_MAC_STR, где X - буква добавляемого устройства (например если их было 4, то 5-ый узел
-  будет иметь букву E согласно алфавиту), а также увеличить AMOUNT_OF_NODES на 1.
-  
-  При необходимости работы с конкретными устройствами или датчиками добавить задачи в код и обеспечить
+- При необходимости работы с конкретными устройствами или датчиками добавить задачи в код и обеспечить
   межпотоковое взаимодействие этих задач с esp_mesh_p2p_tx_main и esp_mesh_p2p_rx_main
    
-- У узлов есть возможность работать сети в в энергосберегающем режиме, определив CONFIG_MESH_ENABLE_PS
-
-- Чтобы изменить топологию с древовидной на chain нужно изменить в хедере mesh_main CONFIG_MESH_TOPOLOGY
-  на MESH_TOPOLOGY_CHAIN
+- У узлов есть возможность работать сети в в энергосберегающем режиме, нужно лишь определет CONFIG_MESH_ENABLE_PS
  
 */
 #include "mesh_main.h"
@@ -97,7 +109,7 @@ void esp_mesh_rx_from_mqtt_and_tx_to_all_nodes(void *arg)
     data.tos = MESH_TOS_P2P;
     is_running = true;
     mqttPayload payload;    
-    {
+    while( is_running ) {
         xQueueReceive(mqtt_queue_rx, &payload, portMAX_DELAY);     
         esp_mesh_get_routing_table((mesh_addr_t *) &route_table,
                                    CONFIG_MESH_ROUTE_TABLE_SIZE * 6, &route_table_size); 
@@ -109,13 +121,13 @@ void esp_mesh_rx_from_mqtt_and_tx_to_all_nodes(void *arg)
         snprintf(str, sizeof(str), "%s/%s", payload.str_topic, payload.str_data);
         printf("Our message to broadcast: %s\n", str);        
         data.data = (uint8_t *)str;     
-        if( strcmp((char *)data.data, "user_f8c55df1/relayA/0") == 0)   
+        if( strcmp((char *)data.data, MQTT_RELAY_TOPIC_0 ) == 0)   
         {
             relay_on_or_off = RELAY_OFF;
             xSemaphoreGive(relay_semaphore);
             continue;
         }
-        else if ( strcmp((char *)data.data, "user_f8c55df1/relayA/1") == 0) 
+        else if ( strcmp((char *)data.data, MQTT_RELAY_TOPIC_1 ) == 0) 
         {
             relay_on_or_off = RELAY_ON;
             xSemaphoreGive(relay_semaphore);
@@ -159,7 +171,7 @@ void esp_mesh_p2p_tx_main(void *arg)
     mesh_data_t data;
     mqttPayload payload;
     char str_to_mqtt[81];    
-    char *str_topic = "user_f8c55df1/tempA";
+    char *str_topic = MQTT_TX_TOPIC;
     char *str_data = heap_caps_malloc(sizeof(str_data), MALLOC_CAP_8BIT);
     int temperature = 24;
     data.data = (uint8_t *)str_to_mqtt;       
@@ -218,9 +230,11 @@ void esp_mesh_rx_from_nodes(void *arg)
     mesh_addr_t from;
     mesh_data_t data;
     int flag = 0;
-    int i = 0, j = 0;            
-    char str_topic[40];
-    char str_data[40];
+    int i = 0, j = 0;  
+	const uint8_t STR_SIZE = STR_TOPIC_SIZE + STR_DATA_SIZE + 1;
+    char str[STR_SIZE];          
+    char str_topic[STR_TOPIC_SIZE];
+    char str_data[STR_DATA_SIZE];
     data.data = (uint8_t *)str;   
     data.size = sizeof(str);       
     is_running = true;
@@ -244,11 +258,11 @@ void esp_mesh_rx_from_nodes(void *arg)
             }
             printf("recv msg from node: %s\n", (char *)data.data );
             buff = (char *)data.data;
-            strcpy(str_topic, "user_f8c55df1/");   
+            strcpy(str_topic, MQTT_PREFIX);   
             i = strlen(str_topic);                  
-            while (i < 80)        
+            while (i < str_size)        
             {
-                if(buff[i+1] >= 48 && buff[i+1] <= 57)  
+                if(buff[i+1] >= ASCII_0 && buff[i+1] <= ASCII_9)  
                 {
                     str_topic[i] = '\0';    
                     i++;    
@@ -279,15 +293,15 @@ void esp_mesh_rx_from_nodes(void *arg)
                 ESP_LOGE(MESH_TAG, "err:0x%x, size:%d", err, data.size);
                 continue;
             }
-            if( strcmp((char *)data.data, "user_f8c55df1/relayA/0") == 0)      
+            if( strcmp((char *)data.data, MQTT_RELAY_TOPIC_0 ) == 0)      
             {
                 printf("Relay A OFF!!\n");
                 relay_on_or_off = RELAY_OFF;
                 xSemaphoreGive(relay_semaphore);
             }
-            else if(strcmp((char *)data.data, "user_f8c55df1/relayA/1") == 0)
+            else if(strcmp((char *)data.data, MQTT_RELAY_TOPIC_1 ) == 0)
             {
-                printf("Relay A OFF!!\n");
+                printf("Relay A ON!!\n");
                 relay_on_or_off = RELAY_ON;
                 xSemaphoreGive(relay_semaphore);
             }
@@ -514,7 +528,7 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
 }
 
 void ip_event_handler(void *arg, esp_event_base_t event_base,
-                      int32_t event_id, void *event_data)
+                      int32_t event_id, void *event_data) 
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
     ESP_LOGI(MESH_TAG, "<IP_EVENT_STA_GOT_IP>IP:" IPSTR, IP2STR(&event->ip_info.ip));

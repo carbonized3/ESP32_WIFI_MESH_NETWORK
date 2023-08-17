@@ -18,9 +18,12 @@
 #define MQTT_EVT_CONNECTED BIT0
 #define BROKER_PASSWORD     "pass_*9*4a**c"  /*	Пароль от аккаунта брокера clusterfly.ru	*/
 #define BROKER_USERNAME     "user_*8c**df*"	 /*	Логин от аккаунта брокера clusterfly.ru		*/
+#define STR_TOPIC_SIZE		40
+#define STR_DATA_SIZE		40
+
 typedef struct {            
-    char str_topic[40];
-    char str_data[40];
+    char str_topic[STR_TOPIC_SIZE];
+    char str_data[STR_DATA_SIZE];
 } mqttPayload;
 /*	Функция для запуска mqtt клиента	*/
 void mqtt_start(void);

@@ -23,7 +23,14 @@
 #define NODE_B_STA_MAC_STR     "94:e6:86:02:77:e4"
 #define NODE_C_STA_MAC_STR     "ac:67:b2:3c:2e:1c"          
 #define NODE_D_STA_MAC_STR     "e0:5a:1b:76:9f:90"          
-#define AMOUNT_OF_NODES                         4      					/*	Увеличивать кол-во при надобности	*/     
+#define AMOUNT_OF_NODES                         4      					/*	Увеличивать кол-во при надобности	*/  
+
+//-----------------------------------------------MQTT_TOPICS----------------------------------------------------------------------
+#define MQTT_TX_TOPIC           "user_f8c55df1/tempA"       /* Топик куда будет отправляться что-либо  */
+#define MQTT_RELAY_TOPIC_0      "user_f8c55df1/relayA/1"    /* Топик с которого мы ждём сообщения с выключением реле */        
+#define MQTT_RELAY_TOPIC_1      "user_f8c55df1/relayA/0"    /* Топик с которого мы ждём сообщения с включением реле */
+
+#define MQTT_PREFIX             "user_f8c55df1/"            /*  Префикс, добавляемый к любому mqtt сообщению. Особенность брокера clusterfly */
 //--------------------------------------------------MESH_DEFINITIONS---------------------------------------------------------------------------
 #define CONFIG_MESH_CHANNEL                     1						/*	Если нужно использовать фиксированный канал	*/       
 #define CONFIG_MESH_ROUTER_SSID                 "TATTELECOM_D143E0"		/*	SSID точки доступа		*/
@@ -35,6 +42,10 @@
 #define CONFIG_MESH_ROUTE_TABLE_SIZE            50
 #define CONFIG_MESH_AP_PASSWD                   "123456789"
 #define CONFIG_MESH_TOPOLOGY                    MESH_TOPO_TREE	/*	При желании поменять топологию с TREE на CHAIN поменять на _CHAIN	*/
+
+#define ASCII_0									48		/* Символ нуля в ASCII таблице	*/
+#define ASCII_9									57
+
 /*	Задача реализующая удаленный доступ по MQTT. Принимает сообщение из mqtt_event_handler и обрабатывает его	*/   
 void esp_mesh_rx_from_mqtt_and_tx_to_all_nodes(void *arg);
 /*	Задача реализующая телеметрию. Отправляем данные в виде температуры или любые другие данные по желанию брокеру MQTT	*/
